@@ -1,0 +1,9 @@
+#!/bin/bash
+
+set PGPASSWORD="$POSTGRES_PASSWORD"
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_DB" --dbname "$POSTGRES_DB" <<-EOSQL
+   CREATE USER egwk4 WITH PASSWORD 'egwk4';
+   CREATE DATABASE egwk4;
+   GRANT ALL PRIVILEGES ON DATABASE egwk4 TO egwk4;
+EOSQL

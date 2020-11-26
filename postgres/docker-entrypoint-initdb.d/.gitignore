@@ -1,0 +1,2 @@
+*.sh.example
+!init_jupyterhub_db.sh

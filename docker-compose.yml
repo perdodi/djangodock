@@ -1,0 +1,175 @@
+version: '3.7'
+
+networks:
+  frontend:
+    driver: ${NETWORKS_DRIVER}
+  backend:
+    driver: ${NETWORKS_DRIVER}
+
+volumes:
+  redis:
+    driver: ${VOLUMES_DRIVER}
+  postgres:
+    driver: ${VOLUMES_DRIVER}
+  elasticsearch:
+    driver: ${VOLUMES_DRIVER}
+  nginx:
+    driver: ${VOLUMES_DRIVER}
+  django:
+    driver: ${VOLUMES_DRIVER}
+
+services:
+
+### PostgreSQL ###########################################
+    postgres:
+      build: ./postgres
+      volumes:
+        - ${DATA_PATH_HOST}/postgres:/var/lib/postgresql/data
+        - ${POSTGRES_ENTRYPOINT_INITDB}:/docker-entrypoint-initdb.d
+        - ${SHARED_DATA_PATH}:/shared
+      ports:
+        - "${POSTGRES_PORT}:5432"
+      environment:
+        - POSTGRES_DB=${POSTGRES_DB}
+        - POSTGRES_USER=${POSTGRES_USER}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        - POSTGRES_HOST=postgres
+        - POSTGRES_PORT=${POSTGRES_PORT}
+      networks:
+        - backend
+
+### pgAdmin ###########################################
+    pgadmin:
+      build: ./pgadmin
+      volumes:
+        - ${DATA_PATH_HOST}/postgres:/var/lib/postgresql/data
+      ports:
+        - "${PGADMIN_PORT}:5050"
+      environment:
+        - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL}
+        - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD}
+        - PGADMIN_LISTEN_PORT=5050
+        # - PGADMIN_ENABLE_TLS
+        # - GUNICORN_THREADS
+      depends_on:
+        - postgres
+      networks:
+        - frontend
+        - backend
+
+### ElasticSearch ########################################
+    elasticsearch:
+      build: ./elasticsearch
+      volumes:
+        - ${DATA_PATH_HOST}/elasticsearch:/usr/share/elasticsearch/data
+        - ${SHARED_DATA_PATH}:/shared
+      environment:
+        - cluster.name=djangodock-cluster
+        - node.name=djangodock-node
+        - bootstrap.memory_lock=true
+        - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+        - cluster.initial_master_nodes=djangodock-node
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+      ports:
+        - "${ELASTICSEARCH_HOST_HTTP_PORT}:9200"
+        - "${ELASTICSEARCH_HOST_TRANSPORT_PORT}:9300"
+      networks:
+        - frontend
+        - backend
+
+### Kibana ##############################################
+    kibana:
+      build: ./kibana
+      ports:
+        - "${KIBANA_HTTP_PORT}:5601"
+      depends_on:
+        - elasticsearch
+      networks:
+        - frontend
+        - backend
+
+### Python Django #########################################
+    django:
+      build:
+        context: ./django
+      volumes:
+        - ${APP_CODE_PATH_HOST}:/code
+        - ${DATA_PATH_HOST}:/data
+        - ${SHARED_DATA_PATH}:/shared
+#      environment:
+#        # - PRODUCTION=false
+#        - POSTGRES_DB=${POSTGRES_DB}
+#        - POSTGRES_USER=${POSTGRES_USER}
+#        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+#        - POSTGRES_HOST=postgres
+#        - POSTGRES_PORT=${POSTGRES_PORT}
+      depends_on:
+        - postgres
+      ports:
+        - "${DJANGO_PORT}:8000"
+      networks:
+        - frontend
+        - backend
+      tty: true
+
+### Redis ################################################
+    redis:
+      build: ./redis
+      volumes:
+        - ${DATA_PATH_HOST}/redis:/data
+      ports:
+        - "${REDIS_PORT}:6379"
+      networks:
+        - backend
+
+### Redis Cluster ##########################################
+    redis-cluster:
+      build: ./redis-cluster
+      ports:
+        - "${REDIS_CLUSTER_PORT_RANGE}:7000-7005"
+      networks:
+        - backend
+
+### Redis WebUI ################################################
+    redis-webui:
+      build:
+        context: ./redis-webui
+      environment:
+        - ADMIN_USER=${REDIS_WEBUI_USERNAME}
+        - ADMIN_PASS=${REDIS_WEBUI_PASSWORD}
+        - REDIS_1_HOST=${REDIS_WEBUI_CONNECT_HOST}
+        - REDIS_1_PORT=${REDIS_WEBUI_CONNECT_PORT}
+      networks:
+        - backend
+      ports:
+        - "${REDIS_WEBUI_PORT}:80"
+      depends_on:
+        - redis
+
+### NGINX Server #########################################
+    nginx:
+      build:
+        context: ./nginx
+        args:
+          - CHANGE_SOURCE=false
+          - http_proxy
+          - https_proxy
+          - no_proxy
+      volumes:
+        - ${APP_CODE_PATH_HOST}:/var/www
+        - ${NGINX_HOST_LOG_PATH}:/var/log/nginx
+        - ${NGINX_SITES_PATH}:/etc/nginx/sites-available
+        - ${NGINX_SSL_PATH}:/etc/nginx/ssl
+        - ${NGINX_LETSENCRYPT_PATH}:/etc/letsencrypt
+        - ${SHARED_DATA_PATH}:/shared
+      ports:
+        - "${NGINX_HOST_HTTP_PORT}:80"
+        - "${NGINX_HOST_HTTPS_PORT}:443"
+      depends_on:
+        - django
+      networks:
+        - frontend
+        - backend
